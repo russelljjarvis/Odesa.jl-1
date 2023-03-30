@@ -6,11 +6,7 @@ using Plots
 import Plots.plot
 using StatsBase
 using Test
-#using BenchmarkTools
 using CUDA
-#function get_layer(layer)
-
-#    return layer
 
 function get_isis(times,nodes)
     spike_dict = Dict()
