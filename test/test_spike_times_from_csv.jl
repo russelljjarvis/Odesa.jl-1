@@ -33,7 +33,7 @@ function get_layer(inv_isi::AbstractFloat, precisionF::Type, precisionInt::Type;
     layer_eta::precisionF = 0.001
     layer_threshEta::precisionF = 0.001
     layer_thresholdOpen::precisionF = 0.01
-    layer_tau::precisionF =  convert(precisionF,inv_isi) #1.0/Int(round(sum(unique(times))/(pop_size*2)))
+    layer_tau::precisionF =  convert(precisionF,inv_isi) 
     layer_traceTau::precisionF = 0.81
     precision::precisionF = convert(precisionInt,0)  
 
