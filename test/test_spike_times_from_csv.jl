@@ -33,10 +33,6 @@ function get_isis(times,nodes)
 end
 
 function get_layer(inv_isi::AbstractFloat, precisionF::Type, precisionInt::Type;cuda=false) 
-    #get_layer(nodes,inv_isi,precisionF,precisionInt,cuda=false)
-    
-
-    #pop_size = length(unique(nodes))
     layer_nNeurons::precisionInt = 20
     layer_eta::precisionF = 0.001
     layer_threshEta::precisionF = 0.001
@@ -46,19 +42,13 @@ function get_layer(inv_isi::AbstractFloat, precisionF::Type, precisionInt::Type;
     precision::precisionF = convert(precisionInt,0)  
 
     if cuda
-        #TypeArray::CuArray = 
         TypeArray = CuArray{typeof(precision),1}(zeros(typeof(layer_eta), layer_nNeurons))
-
         TypeArray2D = CuArray{typeof(precision),2}(zeros(typeof(layer_eta), (layer_nNeurons,2)))
         layer = Odesa.Feast.FC(TypeArray,TypeArray2D,precision,precisionInt(1),precisionInt(pop_size),layer_nNeurons,layer_eta,layer_threshEta,layer_thresholdOpen,layer_tau,layer_traceTau)
     else
-
         TypeArray = Array{typeof(precision),1}(zeros(typeof(layer_eta), layer_nNeurons))
         TypeArray2D = Array{typeof(precision),2}(zeros(typeof(layer_eta), (layer_nNeurons,2)))
-
         layer = Odesa.Feast.FC(TypeArray,TypeArray2D,precision,precisionInt(1),precisionInt(pop_size),layer_nNeurons,layer_eta,layer_threshEta,layer_thresholdOpen,layer_tau,layer_traceTau)
-
-        #get_layer!(layer)
     end
     return layer
 end
