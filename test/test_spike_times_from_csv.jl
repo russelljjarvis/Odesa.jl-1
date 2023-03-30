@@ -54,7 +54,7 @@ function get_layer(inv_isi::AbstractFloat, precisionF::Type, precisionInt::Type;
     else
 
         TypeArray = Array{typeof(precision),1}(zeros(typeof(layer_eta), layer_nNeurons))
-        TypeArray2D = CuArray{typeof(precision),2}(zeros(typeof(layer_eta), (layer_nNeurons,2)))
+        TypeArray2D = Array{typeof(precision),2}(zeros(typeof(layer_eta), (layer_nNeurons,2)))
 
         layer = Odesa.Feast.FC(TypeArray,TypeArray2D,precision,precisionInt(1),precisionInt(pop_size),layer_nNeurons,layer_eta,layer_threshEta,layer_thresholdOpen,layer_tau,layer_traceTau)
 
