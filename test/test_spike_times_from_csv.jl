@@ -54,10 +54,8 @@ nodes = df.x1
 times = df.x2
 perm = sortperm(times)
 nodes = convert(Vector{UInt64},nodes[perm])
-@show(typeof(nodes))
 times = times[perm]
 inv_isi = Float32(1.0/get_isis(times,nodes))
-
 layer16 = get_layer(inv_isi,Float16,UInt16,cuda=true)
 layer32 = get_layer(inv_isi,Float32,UInt32)
 layer16 = get_layer(inv_isi,Float16,UInt16)
