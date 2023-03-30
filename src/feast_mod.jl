@@ -10,10 +10,13 @@ module Feast
     using LinearAlgebra
     import LinearAlgebra.norm
     import LinearAlgebra.mul!
+    using LoopVectorization
+    using StaticArrays
+    import InteractiveUtils.@code_warntype
 
     abstract type FullyConnectedLayer end
 
-    mutable struct FC{T,S,Q,R,P} <: FullyConnectedLayer
+    mutable struct FC{T,S,Q,R,P,X} <: FullyConnectedLayer
         #Layer input dimensions #TODO: This need not be stored. It is useless for FC
         in_rows::P # Int32
         in_cols::P #Int32
@@ -82,12 +85,16 @@ module Feast
             tau,
             traceTau
         )
+
+             #MArray
             #Flattened dimension size
             context_size = input_rows * input_cols 
-            event_context =
-                zeros(typeof(eta), input_rows, input_cols)::Array{typeof(eta),2}
+            event_context = zeros(typeof(eta), input_rows, input_cols)#::Array{typeof(eta),2}
+            #@MArray 
+            #typeof(similar(m3)) == 
+            #event_context = MArray{Tuple{input_rows,input_cols},typeof(eta)}#,2,9} # (final parameter is length = 9)
             w = rand(typeof(eta), context_size, nNeurons)::Array{typeof(eta)}
-            @inbounds for row in range(1, size(w, 2), step = 1)
+            @inline for row in range(1, size(w, 2), step = 1)
                 w[:, row] = w[:, row] ./ norm(w[:, row])
             end
             thresh = zeros(typeof(eta), nNeurons)::Array{typeof(eta),1}
@@ -105,7 +112,7 @@ module Feast
             noWinnerTrace = convert(typeof(eta),0.0)  #convert_precision(0.0,)
 
 
-            new{typeof(input_rows),typeof(eta),Vector,typeof(delta),typeof(precision)}(
+            new{typeof(input_rows),typeof(eta),Vector,typeof(delta),typeof(precision),typeof(StaticArraysCore.MArray)}(
                 
                 input_rows,
                 input_cols,
@@ -133,13 +140,13 @@ module Feast
         end
 
     end
-
+    """
+    Reset the timer of the layer. All the time stamps and polarities will be reset. 
+    All the traces will be set to 0. reset_time has the same effect as no input events for a really
+    long time.
+    """
     function reset_time(layer::FC)
-        """
-        Reset the timer of the layer. All the time stamps and polarities will be reset. 
-        All the traces will be set to 0. reset_time has the same effect as no input events for a really
-        long time.
-        """
+
 
         fill!(layer.delta, zero(eltype(layer.delta))) 
         fill!(layer.deltaThresh, zero(eltype(layer.deltaThresh)))
@@ -151,12 +158,12 @@ module Feast
         return nothing
 
     end
+    """
+    Adds the input event to the timestamp store. Polarity is set to whatever is the decayed value at that
+    channel until time ts, and then added 1 to it. 
+    """
+    function add_event!(layer::FC, x, y, ts)
 
-    function add_event(layer::FC, x, y, ts)
-        """
-        Adds the input event to the timestamp store. Polarity is set to whatever is the decayed value at that
-        channel until time ts, and then added 1 to it. 
-        """
 
         layer.polarity[x, y] =
             layer.polarity[x, y] * exp((layer.timestamps[x, y] - ts) / layer.tau) + 1
@@ -165,12 +172,12 @@ module Feast
         return nothing
 
     end
-
+    """
+    Adds a trace event/ adds the trace of a recently fired neuron. This works the same as "add_event" but 
+    it is keeping track of the firing of own neurons rather than the input spikes. 
+    """
     function add_trace_event(layer::FC, winner, ts)
-        """
-        Adds a trace event/ adds the trace of a recently fired neuron. This works the same as "add_event" but 
-        it is keeping track of the firing of own neurons rather than the input spikes. 
-        """
+
         layer.winnerMV[winner] =
             layer.winnerMV[winner] * exp((layer.winnerTrace[winner] - ts) / layer.traceTau) + 1
         layer.winnerTrace[winner] = ts
@@ -190,42 +197,44 @@ module Feast
             # If Neuron hasn't spiked in a while and there was a recent input spike for which there was no winner
             if punishFlag
                 # Reduce the threshold
+                #setindex!(layer.thresh[neuron],layer.thresh[neuron] - layer.thresholdOpen)
                 layer.thresh[neuron] = layer.thresh[neuron] - layer.thresholdOpen
             end
         end
 
         return nothing
     end
-
+    """
+    Record next layer attention signal
+    """
     function record(layer::FC, ts)
-        """
-        Record next layer attention signal
-        """
+
         punishFlag = exp((layer.noWinnerTrace - ts) / layer.traceTau) >= 0.1
 
         # Record the attention signal for each neuron
         # Threads.@threads for n::Int32 = 1:layer.nNeurons
-        @inbounds for n in 1:layer.nNeurons
+        for n in 1:layer.nNeurons
             #TODO: Recording the attention signal can be done to each neuron parallely
             record_individual_neuron(layer,n,ts,punishFlag)
         end
 
         return nothing
     end
+    """
+    Reward individual neuron 
+    """
     function reward(layer::FC, neuron::Integer)
-        """
-        Reward individual neuron 
-        """
+   
 
         layer_w_n = view(layer.w, :, neuron)
         layer_delta_n = view(layer.delta, :, neuron)
 
         # W = W + η*ΔW
-        layer_w_n .=  layer_w_n .+ layer.eta .* layer_delta_n
+        @turbo @. layer_w_n =  layer_w_n + layer.eta * layer_delta_n
 
     
         # Normalize the weights
-        layer_w_n .= layer_w_n ./ norm(layer_w_n)
+        @turbo @. layer_w_n = layer_w_n / norm(layer_w_n)
 
         # Updated threshold value based on Thresh = Thresh + η*ΔThresh
         updatedThresh = layer.thresh[neuron] +
@@ -241,14 +250,14 @@ module Feast
     Compute the normalized event context at time ts based on the timestamp and polarity stores. 
     """
 
-    function compute_context(layer::FC,ts)
-        layer.event_context .=
-            layer.polarity .*
+    function compute_context!(layer::FC,ts)
+        @turbo @. layer.event_context =
+            layer.polarity *
             exp.(
-                (layer.timestamps .- ts) ./
+                (layer.timestamps - ts) ./
                 layer.tau,
             )
-        layer.event_context .= layer.event_context ./ norm(layer.event_context)
+        layer.event_context = layer.event_context / norm(layer.event_context)
  
         return nothing
     end
@@ -259,7 +268,7 @@ module Feast
         Find winner neuron
         Save the delta and deltaThresh
     """
-    function forward(layer::FC, x::Integer, y::Integer, ts::AbstractFloat)
+    function forward!(layer::FC, x::Integer, y::Integer, ts::AbstractFloat,winnerNeuron::Integer)
     
         # Check if it is a valid input spike
         if x < 1 || y < 1 
@@ -267,13 +276,13 @@ module Feast
             return -1
         end
         # Add event to the timestamp and polarity stores
-        add_event(layer, x, y, ts)
+        add_event!(layer, x, y, ts)
 
         # Compute the event context
-        compute_context(layer, ts)
+        compute_context!(layer, ts)
         
         mul!(layer.dot_prod, layer.w', view(layer.event_context, :))
-        winnerNeuron = -1
+        
         max_value = 0.0
 
         # Find the neuron with highest dot product among the neurons whose dotproduct has
@@ -285,7 +294,7 @@ module Feast
             if layer.dot_prod[neuron] >= layer.thresh[neuron]
                 if layer.dot_prod[neuron] > max_value
                     winnerNeuron = neuron
-                    max_value = layer.dot_prod[neuron]
+                    max_value = getindex(layer.dot_prod,neuron)
                 end
             end
         end
@@ -294,8 +303,8 @@ module Feast
         if winnerNeuron > -1
             # If there is a winner, then save the delta and delta thresh which will be used later to reward 
             layer_delta = view(layer.delta, :, winnerNeuron)
-            layer_delta .= view(layer.event_context, :) .-  view(layer.w, :, winnerNeuron)
-            layer.deltaThresh[winnerNeuron] =  layer.dot_prod[winnerNeuron] - layer.thresh[winnerNeuron]
+            @turbo @. layer_delta = view(layer.event_context, :) -  view(layer.w, :, winnerNeuron)
+            setindex!(layer.deltaThresh,winnerNeuron,layer.dot_prod[winnerNeuron] - layer.thresh[winnerNeuron])
             # Add this winning to the neuron's firing activity
             # add_trace_event(layer, winnerNeuron, ts)
             # Reward the winner neuron. 
@@ -304,22 +313,21 @@ module Feast
         else
             # If there is no winner save the time when there was no winner
 
-            punish(layer)
+            @code_warntype punish!(layer)
 
         end        
         return winnerNeuron
 
     end
-    #{A<:AbstractFloat, B<:Integer}
-
+    """
+    Key forward function of the layer. 
+        Find the normalized context
+        Perform dotproduct
+        Find winner neuron
+        Save the delta and deltaThresh
+    """
     function infer(layer::FC, x::Integer, y::Integer, ts::AbstractFloat)
-        """
-        Key forward function of the layer. 
-            Find the normalized context
-            Perform dotproduct
-            Find winner neuron
-            Save the delta and deltaThresh
-        """
+        
         # Check if it is a valid input spike
         if x < 1 || y < 1 
             # Negative winner value indicates no winner. The same convention is used everywhere
@@ -332,7 +340,6 @@ module Feast
         compute_context(layer, ts)
         
         # Find the dotproduct
-
         mul!(layer.dot_prod, layer.w', view(layer.event_context, :))
         winnerNeuron = -1
         max_value = 0.0
@@ -360,11 +367,11 @@ module Feast
 
     end
 
-    function punish(layer::FC)
+    function punish!(layer::FC)
         """
         Punish all the neurons in the layer
         """
-        layer.thresh = layer.thresh .- layer.thresholdOpen
+        @turbo @. layer.thresh::Vector{typeof(layer.thresholdOpen)} = layer.thresh - layer.thresholdOpen
 
         return nothing
     end

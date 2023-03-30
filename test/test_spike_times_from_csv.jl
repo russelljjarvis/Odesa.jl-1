@@ -1,46 +1,61 @@
 using CSV
 using Odesa
-using CSV, Tables, DataFrames
+using CSV, DataFrames
 using Revise
 using Plots
 import Plots.plot
 using StatsBase
 using Test
+using BenchmarkTools
 
+
+function get_layer(nodes,precisionF,precisionInt)
+    pop_size = length(unique(nodes))
+    feast_layer_nNeurons::precisionInt = 20
+    feast_layer_eta::precisionF = 0.001
+    feast_layer_threshEta::precisionF = 0.001
+    feast_layer_thresholdOpen::precisionF = 0.01
+    feast_layer_tau::precisionF =  1.0/Int(round(sum(unique(times))/(pop_size*2)))
+    feast_layer_traceTau::precisionF = 0.81
+    precision::precisionF = convert(UInt16,0)  
+
+    feast_layer = Odesa.Feast.FC(precision,Int16(1),UInt16(pop_size),feast_layer_nNeurons,feast_layer_eta,feast_layer_threshEta,feast_layer_thresholdOpen,feast_layer_tau,feast_layer_traceTau)
+    return feast_layer
+end
 df = CSV.read("times_for_yesh.csv",DataFrame)
+
 nodes = df.x1
 times = df.x2
-pop_size = length(unique(df.x1))
-feast_layer_nNeurons::Int16 = 20
-feast_layer_eta::Float16 = 0.001
-feast_layer_threshEta::Float16 = 0.001
-feast_layer_thresholdOpen::Float16 = 0.01
-feast_layer_tau::Float32 =  1.0/Int(round(sum(unique(times))/(pop_size*2)))
-feast_layer_traceTau::Float16 = 0.81
-precision::UInt16 = convert(UInt16,0)  
-
-feast_layer = Odesa.Feast.FC(precision,Int16(1),UInt16(pop_size),feast_layer_nNeurons,feast_layer_eta,feast_layer_threshEta,feast_layer_thresholdOpen,feast_layer_tau,feast_layer_traceTau)
 
 perm = sortperm(times)
 nodes = nodes[perm]
 times = times[perm]
-winners = []
-p1=plot(feast_layer.thresh)
-function collect_distances(feast_layer,nodes,times)
-    distances = feast_layer.dot_prod
 
-    for i in 1:325
+feast_layer16 = get_layer(nodes,Float16,Int16)
+feast_layer32 = get_layer(nodes,Float32,Int32)
+
+winners = []
+#p1=plot(feast_layer.thresh)
+function collect_distances(feast_layer,nodes,times,precisionF,precisionInt)
+    distances = feast_layer.dot_prod
+    winnerNeuron = -1
+    @inbounds for i in 1:325
         Odesa.Feast.reset_time(feast_layer)
-        for (y,ts) in zip(nodes,times)
-            winner = Odesa.Feast.forward(feast_layer, Int16(1), Int16(y), Float16(ts))    
+        @inbounds for (y,ts) in zip(nodes,times)
+            Odesa.Feast.forward!(feast_layer, precisionInt(1), precisionInt(y), precisionF(ts), winnerNeuron)    
+            @show(winnerNeuron)
             distances = feast_layer.dot_prod
             
         end
-        display(plot!(p1,feast_layer.thresh,legend=false))
+        #display(plot!(p1,feast_layer.thresh,legend=false))
     end
     distances
 end
-distances = collect_distances(feast_layer,nodes,times)
+@time distances = collect_distances(feast_layer16,nodes,times,Float16,Int16)
+@time distances = collect_distances(feast_layer32,nodes,times,Float32,Int32)
+@time distances = collect_distances(feast_layer16,nodes,times,Float16,Int16)
+
+
 @assert length(distances) !=0
 @assert mean(distances) !=0
 
