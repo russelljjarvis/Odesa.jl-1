@@ -6,54 +6,96 @@ using Plots
 import Plots.plot
 using StatsBase
 using Test
-using BenchmarkTools
+#using BenchmarkTools
+using CUDA
+#function get_layer(layer)
 
+#    return layer
 
-function get_layer(nodes,precisionF,precisionInt)
-    pop_size = length(unique(nodes))
-    feast_layer_nNeurons::precisionInt = 20
-    feast_layer_eta::precisionF = 0.001
-    feast_layer_threshEta::precisionF = 0.001
-    feast_layer_thresholdOpen::precisionF = 0.01
-    feast_layer_tau::precisionF =  1.0/Int(round(sum(unique(times))/(pop_size*2)))
-    feast_layer_traceTau::precisionF = 0.81
-    precision::precisionF = convert(UInt16,0)  
+function get_isis(times,nodes)
+    spike_dict = Dict()
+    all_isis = []
+    for n in unique(nodes)
+        spike_dict[n] = []
+    end
+    for (st,n) in zip(times,nodes)
+        append!(spike_dict[n],st)
+    end
+    for (k,v) in pairs(spike_dict)
+        time_old = 0
+        for time in spike_dict[k][1:end-1]
+            isi = time - time_old
+            append!(all_isis,isi)
+            time_old = time
+        end
+    end
+    return StatsBase.mean(all_isis)
+end
 
-    feast_layer = Odesa.Feast.FC(precision,Int16(1),UInt16(pop_size),feast_layer_nNeurons,feast_layer_eta,feast_layer_threshEta,feast_layer_thresholdOpen,feast_layer_tau,feast_layer_traceTau)
-    return feast_layer
+function get_layer(inv_isi::AbstractFloat, precisionF::Type, precisionInt::Type;cuda=false) 
+    #get_layer(nodes,inv_isi,precisionF,precisionInt,cuda=false)
+    
+
+    #pop_size = length(unique(nodes))
+    layer_nNeurons::precisionInt = 20
+    layer_eta::precisionF = 0.001
+    layer_threshEta::precisionF = 0.001
+    layer_thresholdOpen::precisionF = 0.01
+    layer_tau::precisionF =  convert(precisionF,inv_isi) #1.0/Int(round(sum(unique(times))/(pop_size*2)))
+    layer_traceTau::precisionF = 0.81
+    precision::precisionF = convert(precisionInt,0)  
+
+    if cuda
+        #TypeArray::CuArray = 
+        TypeArray = CuArray{typeof(precision),1}(zeros(typeof(layer_eta), layer_nNeurons))
+
+        TypeArray2D = CuArray{typeof(precision),2}(zeros(typeof(layer_eta), (layer_nNeurons,2)))
+        layer = Odesa.Feast.FC(TypeArray,TypeArray2D,precision,precisionInt(1),precisionInt(pop_size),layer_nNeurons,layer_eta,layer_threshEta,layer_thresholdOpen,layer_tau,layer_traceTau)
+    else
+
+        TypeArray = Array{typeof(precision),1}(zeros(typeof(layer_eta), layer_nNeurons))
+        TypeArray2D = CuArray{typeof(precision),2}(zeros(typeof(layer_eta), (layer_nNeurons,2)))
+
+        layer = Odesa.Feast.FC(TypeArray,TypeArray2D,precision,precisionInt(1),precisionInt(pop_size),layer_nNeurons,layer_eta,layer_threshEta,layer_thresholdOpen,layer_tau,layer_traceTau)
+
+        #get_layer!(layer)
+    end
+    return layer
 end
 df = CSV.read("times_for_yesh.csv",DataFrame)
 
 nodes = df.x1
 times = df.x2
-
 perm = sortperm(times)
-nodes = nodes[perm]
+nodes = convert(Vector{UInt64},nodes[perm])
+@show(typeof(nodes))
 times = times[perm]
+inv_isi = Float32(1.0/get_isis(times,nodes))
 
-feast_layer16 = get_layer(nodes,Float16,Int16)
-feast_layer32 = get_layer(nodes,Float32,Int32)
+layer16 = get_layer(inv_isi,Float16,UInt16,cuda=true)
+layer32 = get_layer(inv_isi,Float32,UInt32)
+layer16 = get_layer(inv_isi,Float16,UInt16)
 
 winners = []
-#p1=plot(feast_layer.thresh)
-function collect_distances(feast_layer,nodes,times,precisionF,precisionInt)
-    distances = feast_layer.dot_prod
+#p1=plot(layer.thresh)
+function collect_distances(layer,nodes,times,precisionF,precisionInt)
+    distances = layer.dot_prod
     winnerNeuron = -1
     @inbounds for i in 1:325
-        Odesa.Feast.reset_time(feast_layer)
+        Odesa.Feast.reset_time(layer)
         @inbounds for (y,ts) in zip(nodes,times)
-            Odesa.Feast.forward!(feast_layer, precisionInt(1), precisionInt(y), precisionF(ts), winnerNeuron)    
+            Odesa.Feast.forward!(layer, precisionInt(1), precisionInt(y), precisionF(ts), winnerNeuron)    
             @show(winnerNeuron)
-            distances = feast_layer.dot_prod
+            distances = layer.dot_prod
             
         end
-        #display(plot!(p1,feast_layer.thresh,legend=false))
+        #display(plot!(p1,layer.thresh,legend=false))
     end
     distances
 end
-@time distances = collect_distances(feast_layer16,nodes,times,Float16,Int16)
-@time distances = collect_distances(feast_layer32,nodes,times,Float32,Int32)
-@time distances = collect_distances(feast_layer16,nodes,times,Float16,Int16)
+@time distances = collect_distances(layer16,nodes,times,Float16,UInt16)
+@time distances = collect_distances(layer32,nodes,times,Float32,UInt32)
+@time distances = collect_distances(layer16,nodes,times,Float16,UInt16)
 
 
 @assert length(distances) !=0

@@ -13,11 +13,13 @@ module Feast
     using LoopVectorization
     using StaticArrays
     import InteractiveUtils.@code_warntype
-
+    using CUDA
     abstract type FullyConnectedLayer end
-
-    mutable struct FC{T,S,Q,R,P,X} <: FullyConnectedLayer
+    # P,X}
+    mutable struct FC{TypeArray,TypeArray2D,P,T,S,Q,R} <: FullyConnectedLayer
         #Layer input dimensions #TODO: This need not be stored. It is useless for FC
+
+        PlaceHolderDefiner::TypeArray
         in_rows::P # Int32
         in_cols::P #Int32
         # Flattened input dimensions
@@ -38,44 +40,46 @@ module Feast
         # Weights of the neurons
 
         
-        w::R#Matrix{Float32}  ???
+        w::TypeArray2D#Matrix{Float32}  ???
 
 
         #Threholds of the neurons
-        thresh::Q
+        thresh::TypeArray
         # Delta stores the latest input context for which the neuron fired. 
-        delta::R # Array{Float32,2}
+        delta::TypeArray2D # Array{Float32,2}
         # DeltaThresh stores the latest dotproduct when the neuron fired.
-        deltaThresh::Q # Array{Float32,1}
+        deltaThresh::TypeArray # Array{Float32,1}
         # timestamps and polarity are used to calculate the timesurface. 
         # They keep track of the latest time of the event from a given input channel. 
-        timestamps::R # Array{Float32,2}
-        polarity:: R # Array{Float32,2}
+        timestamps::TypeArray2D # Array{Float32,2}
+        polarity:: TypeArray2D # Array{Float32,2}
         # WinnerTrace is allocated memory to keep track of the firing times of the neurons in the layer. 
-        winnerTrace:: Q # Array{Float32,1}
+        winnerTrace:: TypeArray # Array{Float32,1}
         # WinnerMV is also utilized to calculate the trace of the layer
-        winnerMV::Q # Array{Float32,1}
+        winnerMV::TypeArray # Array{Float32,1}
         # NoWinnerTrace remembers the last time at which there was no winner
         noWinnerTrace::T # Float32
         ### Pre-allocated memories for commonly calculated matrices/Vectors along the training
         # tempTrace is pre-allocated memory to populate with calculated trace of the neurons
-        tempTrace::Q # Array{Float32,1}
+        tempTrace::TypeArray # Array{Float32,1}
         # Event context is pre-allocated memory to hold the event contexts
         
         
         
-        event_context::R #:: R# Array{Float32,2} ????
+        event_context::TypeArray2D #:: R# Array{Float32,2} ????
 
 
 
         # Dot Product is the pre-allocated memory to hold the dot products
-        dot_prod:: Q# Array{Float32,1}
+        dot_prod:: TypeArray# Array{Float32,1}
 
         ##
         # Constructor function.
         ##
         function FC(
-            precision,
+            PlaceHolderDefiner,
+            PlaceHolderDefiner2D,
+            Precision,
             input_rows,
             input_cols,
             nNeurons,
@@ -93,27 +97,54 @@ module Feast
             #@MArray 
             #typeof(similar(m3)) == 
             #event_context = MArray{Tuple{input_rows,input_cols},typeof(eta)}#,2,9} # (final parameter is length = 9)
-            w = rand(typeof(eta), context_size, nNeurons)::Array{typeof(eta)}
+            w = rand(typeof(eta), context_size, nNeurons)#::typeof(PlaceHolderDefiner)#::CuArray{typeof(eta)}
             @inline for row in range(1, size(w, 2), step = 1)
                 w[:, row] = w[:, row] ./ norm(w[:, row])
             end
-            thresh = zeros(typeof(eta), nNeurons)::Array{typeof(eta),1}
-            dot_prod = zeros(typeof(eta), nNeurons)::Array{typeof(eta),1}
-            delta = zeros(typeof(eta), context_size, nNeurons)::Array{typeof(eta),2}
-            deltaThresh = zeros(typeof(eta), nNeurons)::Array{typeof(eta),1}
-            timestamps = Array{typeof(eta),2}(undef, input_rows, input_cols)
-            polarity  = Array{typeof(eta),2}(undef, input_rows, input_cols)
-            winnerTrace = Array{typeof(eta),1}(undef, nNeurons)
+            thresh = zeros(typeof(eta), nNeurons)#::typeof(PlaceHolderDefiner)#::Array{typeof(eta),1}
+            dot_prod = zeros(typeof(eta), nNeurons)#::typeof(PlaceHolderDefiner)#::Array{typeof(eta),1}
+            deltaThresh = zeros(typeof(eta), nNeurons)#::typeof(PlaceHolderDefiner)#::Array{typeof(eta),1}
+
+            delta = zeros(typeof(eta), context_size, nNeurons)#::typeof(PlaceHolderDefiner2D)
+
+            timestamps = (undef, (input_rows, input_cols))#::typeof(PlaceHolderDefiner) #  Array{typeof(eta),2}
+            #zeros(::UndefInitializer, ::Int16, ::UInt16)
+            polarity  = similar(timestamps)#::typeof(PlaceHolderDefiner2D)#(undef, input_rows, input_cols) # Array{typeof(eta),2}
+
+            println("gets here a")
+            winnerTrace = PlaceHolderDefiner(undef, nNeurons)
+            println("gets here b")
+
             #n#oWinnerTrace = convert_precision(0.0,typeof(eta))
             #noWinnerTrace = Float32(0.0)
-            winnerMV = zeros(typeof(eta), nNeurons)::Array{typeof(eta),1}
-            tempTrace = zeros(typeof(eta), nNeurons)::Array{typeof(eta),1}
+            winnerMV = zeros(typeof(eta), nNeurons)::PlaceHolderDefiner#::Array{typeof(eta),1}
+            println("gets here c")
+
+            tempTrace = zeros(typeof(eta), nNeurons)::PlaceHolderDefiner#::Array{typeof(eta),1}
 
             noWinnerTrace = convert(typeof(eta),0.0)  #convert_precision(0.0,)
 
+            @show(typeof(noWinnerTrace))
+            @show(typeof(tempTrace))
+            @show(typeof(winnerMV))
+            @show(typeof(winnerTrace))
+            @show(typeof(polarity))
+            @show(typeof(timestamps))
+            @show(typeof(delta))
+            @show(typeof(deltaThresh))
+            @show(typeof(dot_prod))
+            @show(typeof(thresh))
+            @show(typeof(w))
+            @show(typeof(event_context))
+            @show(typeof(context_size))
 
-            new{typeof(input_rows),typeof(eta),Vector,typeof(delta),typeof(precision),typeof(StaticArraysCore.MArray)}(
-                
+            
+
+            # ,typeof(precision),typeof(StaticArraysCore.MArray)
+            new{typeof{TypeArray},typeof{TypeArray2D},typeof{Precision},typeof(input_rows),typeof(eta),typeof{TypeArray{typeof(eta)}},typeof(delta)}(
+                TypeArray,
+                TypeArray2D,
+                Precision,
                 input_rows,
                 input_cols,
                 context_size,
