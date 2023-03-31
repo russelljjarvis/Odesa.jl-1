@@ -15,7 +15,6 @@ module Feast
     import InteractiveUtils.@code_warntype
     using CUDA
     abstract type FullyConnectedLayer end
-    # P,X}
     mutable struct FC{TypeArray,TypeArray2D,P,T,S,Q,R} <: FullyConnectedLayer
         #Layer input dimensions #TODO: This need not be stored. It is useless for FC
 
