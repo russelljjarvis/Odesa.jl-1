@@ -92,7 +92,7 @@ Get time surfaces for plotting.
 function get_ts(nodes,times)
     # The temporal resolution of the final timesurface
     dt = 10
-    num_neurons = Int(length(unique(nodes)))+1#int(df.max(axis=0)['x1'])
+    num_neurons = Int(length(unique(nodes)))+1
     total_time =  Int(maximum(times))
     time_resolution = Int(round(total_time/dt))
     # Final output. 
