@@ -7,7 +7,7 @@ module FullyConnected
     using JLD2
     using Revise
     using SparseArrays
-    using Traceur
+    #using Traceur
     using Distributed
     # using Threads
     mutable struct FC

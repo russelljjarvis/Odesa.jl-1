@@ -241,7 +241,7 @@ module Feast
     Compute the normalized event context at time ts based on the timestamp and polarity stores. 
     """
 
-    function compute_context(layer::FC,ts)
+    function compute_context!(layer::FC,ts)
         layer.event_context .=
             layer.polarity .*
             exp.(
@@ -249,9 +249,8 @@ module Feast
                 layer.tau,
             )
         layer.event_context .= layer.event_context ./ norm(layer.event_context)
- 
-        return nothing
-    end
+        #@show(size(layer.event_context))
+     end
     """
     Key forward function of the layer. 
         Find the normalized context
@@ -270,7 +269,7 @@ module Feast
         add_event(layer, x, y, ts)
 
         # Compute the event context
-        compute_context(layer, ts)
+        compute_context!(layer, ts)
         
         mul!(layer.dot_prod, layer.w', view(layer.event_context, :))
         winnerNeuron = -1
@@ -280,15 +279,17 @@ module Feast
         # crossed their thresholds.
 
         # 1D cuda kernel
-
+        #winnerNeuronList = Vector{Float32}([])
         @inbounds for neuron = 1:layer.nNeurons
             if layer.dot_prod[neuron] >= layer.thresh[neuron]
                 if layer.dot_prod[neuron] > max_value
                     winnerNeuron = neuron
                     max_value = layer.dot_prod[neuron]
+                    #push!(winnerNeuronList,max_value)
                 end
             end
         end
+        #@show(winnerNeuronList)
 
 
         if winnerNeuron > -1
@@ -329,7 +330,7 @@ module Feast
         add_event(layer, x, y, ts)
 
         # Compute the event context
-        compute_context(layer, ts)
+        compute_context!(layer, ts)
         
         # Find the dotproduct
 
@@ -344,6 +345,8 @@ module Feast
         # 1D cuda kernel
 
         @inbounds for neuron = 1:layer.nNeurons
+            #@show(layer.dot_prod[neuron])
+            #@show(layer.thresh[neuron])
             if layer.dot_prod[neuron] >= layer.thresh[neuron]
                 if layer.dot_prod[neuron] > max_value
                     winnerNeuron = neuron
